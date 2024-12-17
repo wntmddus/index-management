@@ -101,6 +101,37 @@ abstract class IndexStateManagementRestTestCase : IndexManagementRestTestCase() 
     protected open fun enableValidationService() {
         updateValidationServiceSetting(true)
     }
+    protected fun createOrUpdateRole() {
+        val roleBody = """
+        {
+          "cluster_permissions": ["cluster:admin/snapshot/restore", "cluster:admin/snapshot/create"],
+          "index_permissions": [
+            {
+              "index_patterns": ["*"],
+              "allowed_actions": ["indices:*"]
+            }
+          ]
+        }
+        """.trimIndent()
+
+        client().makeRequest(
+            method = "PUT",
+            endpoint = "/_plugins/_security/api/roles/snapshot_restore_role",
+            entity = StringEntity(roleBody, ContentType.APPLICATION_JSON),
+        )
+
+        // Map your test user to snapshot_restore_role
+        val roleMappingBody = """
+        {
+          "users": ["testUser"]
+        }
+        """.trimIndent()
+        client().makeRequest(
+            method = "PUT",
+            endpoint = "/_plugins/_security/api/rolesmapping/snapshot_restore_role",
+            entity = StringEntity(roleMappingBody, ContentType.APPLICATION_JSON),
+        )
+    }
 
     protected fun createPolicy(
         policy: Policy,

@@ -25,6 +25,7 @@ class ConvertIndexToRemoteActionIT : IndexStateManagementRestTestCase() {
         val policyID = "${testIndexName}_policy_basic"
         val repository = "repository"
 
+        createOrUpdateRole()
         // Step 1: Create an index and index some data
         createIndex(indexName, null)
         indexDoc(indexName, "1", """{"field": "value1"}""")
