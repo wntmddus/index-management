@@ -156,7 +156,6 @@ abstract class IndexStateManagementRestTestCase : IndexManagementRestTestCase() 
             primaryTerm = (policyJson["_primary_term"] as Int).toLong(),
         )
     }
-
     protected fun createPolicyJson(
         policyString: String,
         policyId: String,
