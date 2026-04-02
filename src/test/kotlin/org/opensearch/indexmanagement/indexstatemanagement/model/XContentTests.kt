@@ -274,6 +274,7 @@ class XContentTests : OpenSearchTestCase() {
             ignoreIndexSettings = "",
             numberOfReplicas = 0,
             deleteOriginalIndex = true,
+            waitForCompletion = true,
             index = 0,
         )
 

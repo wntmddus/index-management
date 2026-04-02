@@ -21,6 +21,8 @@ class ConvertIndexToRemoteAction(
     val ignoreIndexSettings: String = "",
     val numberOfReplicas: Int = 0,
     val deleteOriginalIndex: Boolean = false,
+    val waitForCompletion: Boolean = false,
+    val renamePattern: String = DEFAULT_RENAME_PATTERN,
     index: Int,
 ) : Action(name, index) {
 
@@ -32,9 +34,18 @@ class ConvertIndexToRemoteAction(
         const val IGNORE_INDEX_SETTINGS_FIELD = "ignore_index_settings"
         const val NUMBER_OF_REPLICAS_FIELD = "number_of_replicas"
         const val DELETE_ORIGINAL_INDEX_FIELD = "delete_original_index"
+        const val WAIT_FOR_COMPLETION_FIELD = "wait_for_completion"
+        const val RENAME_PATTERN_FIELD = "rename_pattern"
+        const val DEFAULT_RENAME_PATTERN = "\$1_remote"
 
-        // Version when new fields (includeAliases, ignoreIndexSettings, numberOfReplicas, deleteOriginalIndex) were added
-        val VERSION_WITH_NEW_FIELDS = Version.V_3_3_0
+        // Version in which this PR is merged. Use merge-target version for BWC: during rolling upgrade,
+        // nodes not yet upgraded (e.g. Cluster Manager) must be able to parse the stream; new fields
+        // are only written when version is on or after this, so older nodes never receive them.
+        val VERSION_WITH_NEW_FIELDS = Version.V_3_6_0
+        val VERSION_WITH_RENAME_PATTERN = Version.V_3_6_0
+
+        /** Stream: boolean after actionIndex; keep it aligned with the 3.6 rolling-upgrade gate in this PR. */
+        val VERSION_WITH_WAIT_FOR_COMPLETION = Version.V_3_6_0
     }
 
     private val attemptRestoreStep = AttemptRestoreStep(this)
@@ -53,6 +64,12 @@ class ConvertIndexToRemoteAction(
         builder.field(IGNORE_INDEX_SETTINGS_FIELD, ignoreIndexSettings)
         builder.field(NUMBER_OF_REPLICAS_FIELD, numberOfReplicas)
         builder.field(DELETE_ORIGINAL_INDEX_FIELD, deleteOriginalIndex)
+        if (waitForCompletion) {
+            builder.field(WAIT_FOR_COMPLETION_FIELD, waitForCompletion)
+        }
+        if (renamePattern != DEFAULT_RENAME_PATTERN) {
+            builder.field(RENAME_PATTERN_FIELD, renamePattern)
+        }
         builder.endObject()
     }
 
@@ -65,6 +82,12 @@ class ConvertIndexToRemoteAction(
             out.writeInt(numberOfReplicas)
             out.writeBoolean(deleteOriginalIndex)
         }
+        if (out.version.onOrAfter(VERSION_WITH_RENAME_PATTERN)) {
+            out.writeString(renamePattern)
+        }
         out.writeInt(actionIndex)
+        if (out.version.onOrAfter(VERSION_WITH_WAIT_FOR_COMPLETION)) {
+            out.writeBoolean(waitForCompletion)
+        }
     }
 }

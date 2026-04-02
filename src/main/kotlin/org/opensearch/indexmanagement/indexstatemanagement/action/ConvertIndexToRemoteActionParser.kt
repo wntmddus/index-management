@@ -9,13 +9,18 @@ import org.opensearch.core.common.io.stream.StreamInput
 import org.opensearch.core.xcontent.XContentParser
 import org.opensearch.core.xcontent.XContentParser.Token
 import org.opensearch.core.xcontent.XContentParserUtils.ensureExpectedToken
+import org.opensearch.indexmanagement.indexstatemanagement.action.ConvertIndexToRemoteAction.Companion.DEFAULT_RENAME_PATTERN
 import org.opensearch.indexmanagement.indexstatemanagement.action.ConvertIndexToRemoteAction.Companion.DELETE_ORIGINAL_INDEX_FIELD
 import org.opensearch.indexmanagement.indexstatemanagement.action.ConvertIndexToRemoteAction.Companion.IGNORE_INDEX_SETTINGS_FIELD
 import org.opensearch.indexmanagement.indexstatemanagement.action.ConvertIndexToRemoteAction.Companion.INCLUDE_ALIASES_FIELD
 import org.opensearch.indexmanagement.indexstatemanagement.action.ConvertIndexToRemoteAction.Companion.NUMBER_OF_REPLICAS_FIELD
+import org.opensearch.indexmanagement.indexstatemanagement.action.ConvertIndexToRemoteAction.Companion.RENAME_PATTERN_FIELD
 import org.opensearch.indexmanagement.indexstatemanagement.action.ConvertIndexToRemoteAction.Companion.REPOSITORY_FIELD
 import org.opensearch.indexmanagement.indexstatemanagement.action.ConvertIndexToRemoteAction.Companion.SNAPSHOT_FIELD
 import org.opensearch.indexmanagement.indexstatemanagement.action.ConvertIndexToRemoteAction.Companion.VERSION_WITH_NEW_FIELDS
+import org.opensearch.indexmanagement.indexstatemanagement.action.ConvertIndexToRemoteAction.Companion.VERSION_WITH_RENAME_PATTERN
+import org.opensearch.indexmanagement.indexstatemanagement.action.ConvertIndexToRemoteAction.Companion.VERSION_WITH_WAIT_FOR_COMPLETION
+import org.opensearch.indexmanagement.indexstatemanagement.action.ConvertIndexToRemoteAction.Companion.WAIT_FOR_COMPLETION_FIELD
 import org.opensearch.indexmanagement.spi.indexstatemanagement.Action
 import org.opensearch.indexmanagement.spi.indexstatemanagement.ActionParser
 
@@ -43,8 +48,28 @@ class ConvertIndexToRemoteActionParser : ActionParser() {
         } else {
             false
         }
+        val renamePattern = if (sin.version.onOrAfter(VERSION_WITH_RENAME_PATTERN)) {
+            sin.readString()
+        } else {
+            DEFAULT_RENAME_PATTERN
+        }
         val index = sin.readInt()
-        return ConvertIndexToRemoteAction(repository, snapshot, includeAliases, ignoreIndexSettings, numberOfReplicas, deleteOriginalIndex, index)
+        val waitForCompletion = if (sin.version.onOrAfter(VERSION_WITH_WAIT_FOR_COMPLETION)) {
+            sin.readBoolean()
+        } else {
+            false
+        }
+        return ConvertIndexToRemoteAction(
+            repository = repository,
+            snapshot = snapshot,
+            includeAliases = includeAliases,
+            ignoreIndexSettings = ignoreIndexSettings,
+            numberOfReplicas = numberOfReplicas,
+            deleteOriginalIndex = deleteOriginalIndex,
+            waitForCompletion = waitForCompletion,
+            renamePattern = renamePattern,
+            index = index,
+        )
     }
 
     override fun fromXContent(xcp: XContentParser, index: Int): Action {
@@ -54,6 +79,8 @@ class ConvertIndexToRemoteActionParser : ActionParser() {
         var ignoreIndexSettings: String = ""
         var numberOfReplicas: Int = 0
         var deleteOriginalIndex: Boolean = false
+        var waitForCompletion: Boolean = false
+        var renamePattern: String = DEFAULT_RENAME_PATTERN
 
         ensureExpectedToken(Token.START_OBJECT, xcp.currentToken(), xcp)
         while (xcp.nextToken() != Token.END_OBJECT) {
@@ -67,8 +94,16 @@ class ConvertIndexToRemoteActionParser : ActionParser() {
                 IGNORE_INDEX_SETTINGS_FIELD -> ignoreIndexSettings = xcp.text()
                 NUMBER_OF_REPLICAS_FIELD -> numberOfReplicas = xcp.intValue()
                 DELETE_ORIGINAL_INDEX_FIELD -> deleteOriginalIndex = xcp.booleanValue()
+                WAIT_FOR_COMPLETION_FIELD -> waitForCompletion = xcp.booleanValue()
+                RENAME_PATTERN_FIELD -> renamePattern = xcp.text()
                 else -> throw IllegalArgumentException("Invalid field: [$fieldName] found in ConvertIndexToRemoteAction.")
             }
+        }
+
+        if (deleteOriginalIndex && !waitForCompletion) {
+            throw IllegalArgumentException(
+                "delete_original_index requires wait_for_completion to be true so the original index is only removed after restore completes.",
+            )
         }
 
         return ConvertIndexToRemoteAction(
@@ -78,6 +113,8 @@ class ConvertIndexToRemoteActionParser : ActionParser() {
             ignoreIndexSettings = ignoreIndexSettings,
             numberOfReplicas = numberOfReplicas,
             deleteOriginalIndex = deleteOriginalIndex,
+            waitForCompletion = waitForCompletion,
+            renamePattern = renamePattern,
             index = index,
         )
     }

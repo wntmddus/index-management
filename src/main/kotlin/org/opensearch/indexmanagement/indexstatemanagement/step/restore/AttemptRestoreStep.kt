@@ -93,7 +93,10 @@ class AttemptRestoreStep(private val action: ConvertIndexToRemoteAction) : Step(
             // Use the snapshot name from the selected SnapshotInfo
             snapshotName = latestSnapshotInfo.snapshotId().name
 
-            val remoteIndexName = "${indexName}_remote"
+            // Calculate remote index name from rename pattern
+            // renamePattern like "$1_remote" means replace $1 with the index name
+            // So "myindex" with pattern "$1_remote" becomes "myindex_remote"
+            val remoteIndexName = action.renamePattern.replace("\$1", indexName)
 
             // Check if remote index exists
             val remoteIndexExists = checkRemoteIndexExists(context, remoteIndexName)
@@ -140,14 +143,15 @@ class AttemptRestoreStep(private val action: ConvertIndexToRemoteAction) : Step(
         snapshotName: String?,
         mutableInfo: MutableMap<String, Any>,
     ) {
-        val remoteIndexName = "${indexName}_remote"
+        // Calculate remote index name from rename pattern
+        val remoteIndexName = action.renamePattern.replace("\$1", indexName)
         // Proceed with the restore operation
         val restoreSnapshotRequest = RestoreSnapshotRequest(repository, snapshotName)
             .indices(indexName)
             .storageType(RestoreSnapshotRequest.StorageType.REMOTE_SNAPSHOT)
             .renamePattern("^(.*)\$")
-            .renameReplacement("$1_remote")
-            .waitForCompletion(false)
+            .renameReplacement(action.renamePattern)
+            .waitForCompletion(action.waitForCompletion)
             .includeAliases(action.includeAliases)
             .ignoreIndexSettings(action.ignoreIndexSettings)
 
@@ -163,15 +167,30 @@ class AttemptRestoreStep(private val action: ConvertIndexToRemoteAction) : Step(
 
         when (response.status()) {
             RestStatus.ACCEPTED, RestStatus.OK -> {
-                // Only delete original index if explicitly enabled
-                if (action.deleteOriginalIndex) {
-                    deleteOriginalIndex(context, indexName, mutableInfo)
+                if (action.waitForCompletion) {
+                    val remoteReady = checkRemoteIndexExists(context, remoteIndexName)
+                    if (remoteReady) {
+                        if (action.deleteOriginalIndex) {
+                            deleteOriginalIndex(context, indexName, mutableInfo)
+                        }
+                        stepStatus = StepStatus.COMPLETED
+                        mutableInfo["message"] = getSuccessMessage(indexName)
+                        logger.info("Restore completed for snapshot [$snapshotName], remote index [$remoteIndexName] is ready")
+                    } else {
+                        // Be conservative: even though restore was requested with wait_for_completion=true,
+                        // remote index may not be visible in cluster state yet.
+                        stepStatus = StepStatus.CONDITION_NOT_MET
+                        mutableInfo["message"] = "Waiting for remote index [$remoteIndexName] to be created"
+                        logger.info("Restore returned but remote index [$remoteIndexName] not visible yet; will retry")
+                    }
+                } else {
+                    // Async restore: do NOT delete the original index in this step.
+                    stepStatus = StepStatus.CONDITION_NOT_MET
+                    mutableInfo["message"] = "Waiting for remote index [$remoteIndexName] to be created"
+                    logger.info("Restore accepted for snapshot [$snapshotName], waiting for remote index [$remoteIndexName] to be created")
                 }
-                // Mark as waiting for completion
-                stepStatus = StepStatus.CONDITION_NOT_MET
-                mutableInfo["message"] = "Waiting for remote index [$remoteIndexName] to be created"
-                logger.info("Restore accepted for snapshot [$snapshotName], waiting for remote index [$remoteIndexName] to be created")
             }
+
             else -> {
                 val message = getFailedMessage(indexName, "Unexpected response status: ${response.status()}")
                 logger.warn("$message - $response")
@@ -193,7 +212,7 @@ class AttemptRestoreStep(private val action: ConvertIndexToRemoteAction) : Step(
                 delete(DeleteIndexRequest(indexName), it)
             }
             if (deleteResponse.isAcknowledged) {
-                logger.info("Successfully deleted original index [$indexName] after restore was accepted")
+                logger.info("Successfully deleted original index [$indexName] after restore was completed")
                 mutableInfo["deleted_original_index"] = true
             } else {
                 logger.warn("Delete request for original index [$indexName] was not acknowledged")
@@ -260,6 +279,6 @@ class AttemptRestoreStep(private val action: ConvertIndexToRemoteAction) : Step(
         const val name = "attempt_restore"
         fun getFailedMessage(index: String, cause: String) = "Failed to start restore for [index=$index], cause: $cause"
         fun getFailedRestoreMessage(index: String) = "Failed to start restore due to concurrent restore or snapshot in progress [index=$index]"
-        fun getSuccessMessage(index: String) = "Successfully started restore for [index=$index]"
+        fun getSuccessMessage(index: String) = "Successfully restored remote index for [index=$index]"
     }
 }

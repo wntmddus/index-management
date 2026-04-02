@@ -180,6 +180,7 @@ class ConvertIndexToRemoteActionIT : IndexStateManagementRestTestCase() {
             snapshot = indexName,
             numberOfReplicas = 0,
             deleteOriginalIndex = true, // Enable deletion of original index
+            waitForCompletion = true,
             index = 0,
         )
 
